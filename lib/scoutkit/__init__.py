@@ -48,7 +48,15 @@ from .logs import (
     split_records,
     stack_frames,
 )
-from .redaction import charset_of, fingerprint, looks_like_placeholder, mask, shannon_entropy
+from .redaction import (
+    charset_of,
+    credential_spans,
+    fingerprint,
+    looks_like_placeholder,
+    mask,
+    redact_text,
+    shannon_entropy,
+)
 from .render import render_html, render_markdown
 from .text import IMPERATIVE_VERBS, jaccard, significant_tokens, title_case_words, truncate
 from .versions import RangeKind, Version, bump_kind, parse_version, range_kind
@@ -75,6 +83,7 @@ __all__ = [
     "changed_symbols",
     "charset_of",
     "classify_path",
+    "credential_spans",
     "deepest_application_frame",
     "detect_language",
     "fingerprint",
@@ -95,6 +104,7 @@ __all__ = [
     "read_json",
     "read_jsonl",
     "read_text",
+    "redact_text",
     "relative_label",
     "render_html",
     "render_markdown",

@@ -78,4 +78,4 @@ nothing to a tenant, and respects Scout's runtime permission model for every act
 
 Built as part of the Scout Code Ops Kit — eight deterministic, offline skills that
 read a codebase and report what it is hiding — and published here as a standalone
-entry. Version 1.0.0.
+entry. Version 1.1.0.

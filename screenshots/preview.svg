@@ -11,7 +11,7 @@
   <text x="200" y="118" font-size="26" fill="#dbe7ff" letter-spacing="3" opacity=".9">SCOUT MEETING OPS</text>
   <rect x="150" y="140" width="124" height="42" rx="10" fill="hsl(276, 82%, 62%)"/>
   <text x="212" y="169" font-size="22" font-weight="700" fill="#08131f" text-anchor="middle" letter-spacing="2">SKILL</text>
-  <text x="292" y="170" font-size="20" fill="#c7d6f0" opacity=".8">v1.0.0 · offline · read-only</text>
+  <text x="292" y="170" font-size="20" fill="#c7d6f0" opacity=".8">v1.1.0 · offline · read-only</text>
   <rect x="150" y="196" width="980" height="368" rx="20" fill="#ffffff" opacity="0.97"/>
   <rect x="150" y="196" width="980" height="56" rx="20" fill="#0c1e3a" opacity="0.05"/>
   <circle cx="178" cy="224" r="7" fill="#ff5f57"/><circle cx="200" cy="224" r="7" fill="#febc2e"/><circle cx="222" cy="224" r="7" fill="#28c840"/>

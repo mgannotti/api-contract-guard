@@ -49,7 +49,7 @@
                     },
                     "cursor": {
                       "type": "string",
-                      "nullable": false
+                      "nullable": true
                     }
                   }
                 }

@@ -29,5 +29,5 @@
   "source_pack": "scout-codeops-kit",
   "template": "templates/surface.example.json",
   "tests": "tests/test_api_contract_guard.py",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

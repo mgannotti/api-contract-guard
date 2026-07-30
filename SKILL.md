@@ -32,10 +32,13 @@ are not symmetric:
   (requests) or who *receives and branches on* it (responses). Adding an enum
   value breaks only the caller who switches *exhaustively* with no default branch
   — a narrow, real, but low-severity case we name precisely rather than inflate.
-- **Types — narrowing breaks, widening does not.** `string → integer`,
-  `number → integer`, or `nullable → non-nullable` rejects values a caller was
-  allowed to send or relied on receiving. The reverse accepts more and breaks no
-  one, so it is not flagged.
+- **Types — and the direction flips between request and response.** On a
+  *request*, narrowing breaks: `string → integer`, `number → integer`, or
+  `nullable → non-nullable` rejects values a caller was allowed to send. On a
+  *response* the mirror image holds — what breaks a caller is the field getting
+  **wider**: `non-nullable → nullable` crashes anything that dereferences it, and
+  an opened enum delivers values the caller never handled. A response field that
+  becomes *always present* is entirely safe and is not flagged.
 
 Get this backwards and you cry wolf on safe changes while waving through the ones
 that page someone. This skill is built around getting it right.
@@ -102,8 +105,10 @@ operation or a new required field — appears.
 - `AC003` **HIGH — an optional parameter became required.** Callers that leaned on
   the default now have to supply it.
 - `AC004` **HIGH — a response field is gone.** Callers that read it get nothing.
-- `AC005` **HIGH — a type was narrowed** (`string → enum`, `number → integer`,
-  nullable → non-nullable). Values that were legal are now rejected.
+- `AC005` **HIGH — a type changed in a caller-breaking direction.** On a request
+  that means narrowing (`string → enum`, `number → integer`, nullable →
+  non-nullable): values that were legal are now rejected. On a response it means
+  the opposite — widening, such as non-nullable → nullable or an enum opening up.
 - `AC006` **MEDIUM — an enum value was removed.** Breaks the caller who sends or
   handles it.
 - `AC007` **LOW — an enum value was added.** Breaks *only* consumers that switch
@@ -124,8 +129,11 @@ operation or a new required field — appears.
 - **Renames (AC010) are inferred, not known.** The heuristic is same location +
   same position + same type + different name. An edit that inserts or reorders
   parameters can hide a real rename or manufacture a false one. Every AC010 is a
-  reading to confirm, never a fact — and it deliberately suppresses the AC002 that
-  the "new" name would otherwise raise, so a wrong guess hides a real break.
+  reading to confirm, never a fact — which is why it no longer suppresses
+  anything. A rename guess used to cancel the `AC002` CRITICAL that the "new"
+  name would otherwise raise, so a coincidence of position and type could
+  downgrade a break every caller was about to hit. Both findings are now
+  reported together: AC010 explains, AC002 decides the verdict.
 - **`$ref`, `allOf`/`oneOf`/`anyOf`, and schemas nested deeper than two levels are
   not resolved.** A break hidden inside a `$ref` or a deep union is not seen. Flag
   heavily-`$ref`'d specs as only partially covered.

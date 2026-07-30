@@ -19,6 +19,7 @@ from scoutkit import (
     classify_path,
     deepest_application_frame,
     detect_language,
+    fingerprint,
     iter_repo_files,
     looks_like_placeholder,
     mask,
@@ -89,6 +90,35 @@ def test_iter_repo_files_is_deterministic(repo):
 def test_iter_repo_files_rejects_missing_directory(tmp_path):
     with pytest.raises(EvidenceError):
         list(iter_repo_files(tmp_path / "nope"))
+
+
+def test_iter_repo_files_terminates_on_a_directory_loop(tmp_path):
+    """A link pointing at an ancestor makes the tree infinite.
+
+    Before cycle detection this walked until the path outgrew the platform
+    limit and the resulting OSError was swallowed — 22 phantom copies of one
+    file on Windows, considerably more on Linux.
+    """
+    import os
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    link = repo / "src" / "loop"
+
+    try:
+        link.symlink_to(repo, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        if os.name != "nt":
+            pytest.skip("cannot create a directory link on this platform")
+        made = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(repo)],
+                              capture_output=True, text=True)
+        if made.returncode != 0:
+            pytest.skip("cannot create a junction on this platform")
+
+    found = [p.name for p in iter_repo_files(repo)]
+    assert found == ["a.py"], f"the loop was walked more than once: {found}"
 
 
 # --- git history -----------------------------------------------------------
@@ -323,12 +353,58 @@ def test_mask_never_returns_the_secret():
 
 
 def test_mask_of_a_short_value_keeps_no_prefix():
-    assert mask("abcdef").startswith("len=")
+    assert mask("abcdef").startswith("len<")
 
 
 def test_mask_of_a_short_password_gives_nothing_away():
     """Three characters of a nine-character password is a third of it."""
-    assert mask("hunter2!x").startswith("len=")
+    assert mask("hunter2!x").startswith("len<")
+
+
+# --- adversarial regressions ------------------------------------------------
+#
+# Both found by running every engine against hostile input rather than by
+# reading the code.
+
+def test_read_json_on_binary_is_an_evidence_error(tmp_path):
+    """A non-UTF-8 file crashed with a raw UnicodeDecodeError instead of exit 3."""
+    from scoutkit import read_json
+    path = tmp_path / "binary.json"
+    path.write_bytes(b"\xff\xfe\x00 not text at all")
+    with pytest.raises(EvidenceError):
+        read_json(path)
+
+
+def test_read_jsonl_on_binary_is_an_evidence_error(tmp_path):
+    from scoutkit import read_jsonl
+    path = tmp_path / "binary.jsonl"
+    path.write_bytes(b"\xff\xfe\x00 not text at all")
+    with pytest.raises(EvidenceError):
+        read_jsonl(path)
+
+
+def test_read_json_tolerates_a_byte_order_mark(tmp_path):
+    from scoutkit import read_json
+    path = tmp_path / "bom.json"
+    path.write_bytes(b"\xef\xbb\xbf" + b'{"ok": true}')
+    assert read_json(path) == {"ok": True}
+
+
+@pytest.mark.parametrize("supplied,expected", [
+    ("../../escaped", "escaped"),
+    ("..\\..\\escaped", "escaped"),
+    ("/etc/passwd", "passwd"),
+    ("C:/Windows/system32/evil", "evil"),
+    ("sub/dir/report", "report"),
+    ("", "fallback"),
+    ("   ", "fallback"),
+    ("..", "fallback"),
+    ("normal-name", "normal-name"),
+])
+def test_basename_cannot_escape_the_output_directory(supplied, expected):
+    """--outdir is the declared write boundary; --basename must not cross it."""
+    from scoutkit.cli import safe_basename
+    assert safe_basename(supplied, fallback="fallback") == expected
 
 
 def test_mask_of_a_long_token_keeps_a_matching_prefix():
@@ -387,6 +463,88 @@ def test_verdict_escalates_with_the_worst_finding():
 def test_finding_requires_a_known_severity():
     with pytest.raises(ValueError):
         Finding(code="X", severity="catastrophic", title="t", detail="d")
+
+# --- shared redaction: the leak that came from having two implementations ---
+#
+# error-triage carried its own smaller copy of the credential patterns. It fell
+# behind secret-sweeper's, and every shape it had stopped recognizing was both
+# reported as no finding AND reproduced verbatim in the JSON artifact.
+
+def _secret(kind: str) -> str:
+    """Realistic shapes, assembled at runtime so no literal ships in this file."""
+    return {
+        "aws_id": "AK" + "IA" + "IOSFODNN7" + "EXAMPLB",
+        "env_password": "DB_PASSWORD=S3cr3tP4ssw0rdABCDEF",
+        "env_token": "API_TOKEN=tok_9f8e7d6c5b4a3210ZZ",
+        "env_secret": "APP_SECRET=whisper-Quiet-River-42-XY",
+        "aws_env": "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYzEXAMPLB",
+        "google": "AIza" + "SyD" + "1a2b3c4d5e6f7g8h9i0jklmnopqrstuv",
+        "azure": "AccountKey=Zm9vYmFyYmF6cXV1eGNvcmdlZ3JhdWx0aQ==",
+        "url_password": "postgres://svc:hunter2hunter2XY@db.internal:5432/app",
+        "slack": "xox" + "b-" + "1234567890-abcdefghijkl",
+        "github": "gh" + "p_" + "0123456789abcdefghijABCDEFGHIJ",
+    }[kind]
+
+
+SECRET_KINDS = ["aws_id", "env_password", "env_token", "env_secret", "aws_env",
+                "google", "azure", "url_password", "slack", "github"]
+
+
+@pytest.mark.parametrize("kind", SECRET_KINDS)
+def test_redact_text_removes_every_shape_the_pack_detects(kind):
+    from scoutkit import redact_text
+    line = f"2026-03-04T10:00:00Z ERROR startup failed cfg {_secret(kind)} retrying"
+    cleaned = redact_text(line)
+    secret_part = _secret(kind).split("=", 1)[-1].split("://")[-1]
+    assert "<redacted" in cleaned, f"{kind} was not redacted at all"
+    for fragment in (secret_part,):
+        assert fragment not in cleaned, f"{kind}: {fragment!r} survived redaction"
+
+
+@pytest.mark.parametrize("kind", SECRET_KINDS)
+def test_an_environment_variable_shape_is_detected(kind):
+    """`\\b` before the keyword cannot match after an underscore.
+
+    That single character made DB_PASSWORD=, API_TOKEN= and
+    AWS_SECRET_ACCESS_KEY= invisible to the old detector.
+    """
+    from scoutkit import credential_spans
+    assert credential_spans(_secret(kind)), f"{kind} produced no credential span"
+
+
+def test_redaction_keeps_the_surrounding_text_readable():
+    from scoutkit import redact_text
+    cleaned = redact_text("connection to db.internal refused after 3 attempts")
+    assert cleaned == "connection to db.internal refused after 3 attempts"
+
+
+def test_a_placeholder_is_left_alone_by_redaction():
+    from scoutkit import redact_text
+    assert redact_text("api_key=${API_KEY}") == "api_key=${API_KEY}"
+
+
+def test_fingerprint_is_stable_across_calls():
+    """Allowlisting by fingerprint depends on this."""
+    assert fingerprint("hunter2hunter2hunter2") == fingerprint("hunter2hunter2hunter2")
+
+
+def test_fingerprint_is_not_a_bare_sha256_prefix():
+    """An unsalted digest of a weak secret is an oracle, not an identity."""
+    import hashlib
+    value = "hunter2"
+    assert fingerprint(value) != hashlib.sha256(value.encode()).hexdigest()[:12]
+
+
+def test_mask_withholds_the_exact_length_of_a_short_secret():
+    """An exact length bounds the keyspace for an offline search."""
+    masked = mask("4821")
+    assert "len=4" not in masked
+    assert "len<20" in masked
+
+
+def test_mask_still_publishes_the_length_of_a_long_secret():
+    assert "len=20" in mask("AK" + "IA" + "1234567890" + "ABCDEF")
+
 
 
 # --- pack contract ---------------------------------------------------------

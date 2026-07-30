@@ -74,16 +74,31 @@ def build_parser(*, skill: str, description: str) -> argparse.ArgumentParser:
     return parser
 
 
+def safe_basename(basename: str, *, fallback: str) -> str:
+    """Reduce an artifact stem to a bare filename.
+
+    ``--outdir`` is the caller's declared write boundary, and ``--basename`` must
+    not be able to cross it: ``--basename ../../evil`` would otherwise create
+    directories and write artifacts outside the directory an automation
+    deliberately confined the run to. Only the final component survives.
+    """
+    candidate = str(basename or "").strip().replace("\\", "/")
+    name = candidate.rsplit("/", 1)[-1]
+    name = name.strip().strip(".")
+    return name or fallback
+
+
 def emit(report: Report, outdir: str | os.PathLike[str], basename: str, formats: Sequence[str], *, title: str) -> list[Path]:
     """Write the report in each requested format and return the artifact paths."""
     out = Path(outdir)
+    stem = safe_basename(basename, fallback=report.skill or "report")
     written: list[Path] = []
     if "json" in formats:
-        written.append(write_json(out / f"{basename}.json", report.to_dict()))
+        written.append(write_json(out / f"{stem}.json", report.to_dict()))
     if "md" in formats:
-        written.append(write_text(out / f"{basename}.md", render_markdown(report, title=title)))
+        written.append(write_text(out / f"{stem}.md", render_markdown(report, title=title)))
     if "html" in formats:
-        written.append(write_text(out / f"{basename}.html", render_html(report, title=title)))
+        written.append(write_text(out / f"{stem}.html", render_html(report, title=title)))
     return written
 
 

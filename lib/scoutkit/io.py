@@ -26,13 +26,37 @@ class EvidenceError(ValueError):
     """Raised when supplied evidence is missing or structurally unusable."""
 
 
+def _decode(path: Path) -> str:
+    """Decode a file as UTF-8, tolerating a BOM and refusing binary honestly.
+
+    ``read_text`` replaces undecodable bytes because a log with one bad byte is
+    still a log. A structured file is different: silently replacing bytes inside
+    JSON produces either a parse error blamed on the wrong thing or, worse,
+    something that parses into different data than the file contains. So this
+    says plainly that the file is not text.
+    """
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise EvidenceError(
+            f"{path} is not valid UTF-8 text: {exc.reason} at byte {exc.start}"
+        ) from exc
+
+
 def read_text(path: str | os.PathLike[str], *, max_bytes: int = _MAX_TEXT_BYTES) -> str:
-    """Read a text file as UTF-8, replacing undecodable bytes rather than failing."""
+    """Read a text file as UTF-8, replacing undecodable bytes rather than failing.
+
+    ``utf-8-sig`` strips a byte-order mark. Callers sniff a format from the first
+    non-space character, and ``str.lstrip()`` does not remove a BOM — so without
+    this, a coverage report saved by PowerShell 5.1 or a Windows editor is
+    rejected as an unrecognized format despite being perfectly valid.
+    """
     p = Path(path)
     if not p.is_file():
         raise EvidenceError(f"not a file: {p}")
     data = p.read_bytes()[:max_bytes]
-    return data.decode("utf-8", errors="replace")
+    return data.decode("utf-8-sig", errors="replace")
 
 
 def read_json(path: str | os.PathLike[str]) -> Any:
@@ -40,7 +64,7 @@ def read_json(path: str | os.PathLike[str]) -> Any:
     if not p.is_file():
         raise EvidenceError(f"not a file: {p}")
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return json.loads(_decode(p))
     except json.JSONDecodeError as exc:
         raise EvidenceError(f"invalid JSON in {p}: {exc}") from exc
 
@@ -51,7 +75,7 @@ def read_jsonl(path: str | os.PathLike[str]) -> list[Any]:
     if not p.is_file():
         return []
     records: list[Any] = []
-    for lineno, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
+    for lineno, line in enumerate(_decode(p).splitlines(), start=1):
         stripped = line.strip()
         if not stripped:
             continue

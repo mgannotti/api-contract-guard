@@ -164,6 +164,11 @@ def iter_repo_files(
     ``max_files`` is a guard, not a preference: crossing it means the caller is
     pointed at something larger than a repository and the result would be
     misleading rather than merely slow.
+
+    Directory cycles are detected by identity, not by path. A symlink or a
+    junction pointing at an ancestor makes the tree infinite, and walking it
+    terminates only by accident — on Windows when the path outgrows the limit,
+    on Linux considerably later. Each directory is visited once.
     """
     base = Path(root)
     if base.is_file():
@@ -172,7 +177,21 @@ def iter_repo_files(
     if not base.is_dir():
         raise EvidenceError(f"no such directory: {base}")
 
+    def identity(path: Path) -> tuple[int, int] | str:
+        """Filesystem identity, falling back to the resolved path."""
+        try:
+            info = path.stat()
+            if info.st_ino:
+                return (info.st_dev, info.st_ino)
+        except OSError:
+            pass
+        try:
+            return str(path.resolve())
+        except OSError:
+            return str(path)
+
     count = 0
+    seen: set[tuple[int, int] | str] = {identity(base)}
     stack = [base]
     while stack:
         current = stack.pop()
@@ -183,8 +202,13 @@ def iter_repo_files(
         for entry in entries:
             try:
                 if entry.is_dir():
-                    if include_ignored_dirs or entry.name not in IGNORED_DIRS:
-                        stack.append(entry)
+                    if not include_ignored_dirs and entry.name in IGNORED_DIRS:
+                        continue
+                    marker = identity(entry)
+                    if marker in seen:
+                        continue
+                    seen.add(marker)
+                    stack.append(entry)
                 elif entry.is_file():
                     count += 1
                     if count > max_files:

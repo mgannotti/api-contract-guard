@@ -324,7 +324,11 @@ def load_surface(path: str) -> tuple[str, dict[str, Operation]]:
 # --- comparison ------------------------------------------------------------
 
 def _narrowings(ot: str, oe: tuple, on: bool, nt: str, ne: tuple, nn: bool) -> list[str]:
-    """Ways ``new`` accepts fewer values than ``old`` — each one breaks a caller."""
+    """Ways ``new`` accepts fewer values than ``old`` — each one breaks a caller.
+
+    This is *request* direction. An input that accepts less than it used to
+    rejects traffic that previously worked.
+    """
     reasons: list[str] = []
     if on and not nn:
         reasons.append("nullable became non-nullable")
@@ -334,6 +338,31 @@ def _narrowings(ot: str, oe: tuple, on: bool, nt: str, ne: tuple, nn: bool) -> l
         ob, nb = TYPE_BREADTH.get(ot.lower()), TYPE_BREADTH.get(nt.lower())
         if ob is not None and nb is not None and nb < ob:
             reasons.append(f"{ot} narrowed to {nt}")
+    return reasons
+
+
+def _widenings(ot: str, oe: tuple, on: bool, nt: str, ne: tuple, nn: bool) -> list[str]:
+    """Ways ``new`` returns more than ``old`` — each one breaks a caller.
+
+    Responses are the mirror of requests and must not share a direction. What
+    breaks a caller reading a response is the field getting *wider*: a value
+    that was always present becoming null, a closed set opening up, a type
+    growing beyond what the caller's parser accepts.
+
+    Applying the request rule here inverts both halves — it reports
+    ``nullable -> non-nullable`` (a field that is now always present, entirely
+    safe) as breaking, and stays silent on ``non-nullable -> nullable``, which
+    crashes every caller that dereferences it.
+    """
+    reasons: list[str] = []
+    if not on and nn:
+        reasons.append("a field that was always present can now be null")
+    if oe and not ne:
+        reasons.append("a fixed set of values was opened up")
+    if ot and nt and ot != nt:
+        ob, nb = TYPE_BREADTH.get(ot.lower()), TYPE_BREADTH.get(nt.lower())
+        if ob is not None and nb is not None and nb > ob:
+            reasons.append(f"{ot} widened to {nt}")
     return reasons
 
 
@@ -352,7 +381,13 @@ class Diff:
 
 
 def _match_renames(bparams: dict, cparams: dict) -> list[tuple[str, str]]:
-    """Params that look renamed: same location, same position, same type, new name."""
+    """Params that look renamed: same location, same position, same type, new name.
+
+    The pairing is deliberately generous, because the *narrative* is useful: a
+    reader wants to know that `nickname` probably became `handle`. What it must
+    never do is silence the consequence — see the AC002 loop below, which no
+    longer treats a rename as a reason to skip a newly required parameter.
+    """
     removed = [p for n, p in bparams.items() if n not in cparams]
     added = [p for n, p in cparams.items() if n not in bparams]
     pairs: list[tuple[str, str]] = []
@@ -385,17 +420,27 @@ def compare_operation(diff: Diff, bop: Operation, cop: Operation) -> None:
                   f"{old} -> {new}", changelog=f"`{old}` renamed to `{new}` on `{where}`")
 
     # New request inputs.
+    #
+    # A rename guess must never suppress this. Position-and-type coincidence is
+    # weak evidence, so two unrelated edits — drop an optional param, add a
+    # required one — read as a rename; and even a genuine rename of a required
+    # parameter breaks every caller still sending the old name. Either way the
+    # CRITICAL is the truthful report, and AC010 remains alongside it as the
+    # explanation.
     for name, cparam in cparams.items():
-        if name in bparams or name in renamed_new:
+        if name in bparams:
             continue
         if cparam.required and not cparam.has_default:
             diff.emit("AC002", Severity.CRITICAL, "A new required parameter has no default",
                       f"`{where}` now requires `{name}` with no default. Every existing caller omits "
-                      f"it and breaks immediately with a rejected request.",
+                      f"it and breaks immediately with a rejected request."
+                      + (f" It looks like a rename of `{dict((n, o) for o, n in renames).get(name)}`, "
+                         f"which does not spare callers that still send the old name."
+                         if name in renamed_new else ""),
                       f"{where}::{name}", f"Make `{name}` optional with a safe default, or ship it on a "
                       f"new version and keep the old one answering.",
                       changelog=f"`{where}` requires new parameter `{name}` (no default)")
-        else:
+        elif name not in renamed_new:
             diff.additive = True  # a new optional parameter is safe to add
 
     # Inputs present in both.
@@ -430,12 +475,12 @@ def compare_operation(diff: Diff, bop: Operation, cop: Operation) -> None:
             diff.additive = True  # a new response field is safe to add
     for name in sorted(set(bfields) & set(cfields)):
         bf, cf = bfields[name], cfields[name]
-        for reason in _narrowings(bf.type, bf.enum, bf.nullable, cf.type, cf.enum, cf.nullable):
-            diff.emit("AC005", Severity.HIGH, "A response field type was narrowed",
-                      f"On `{where}`, response field `{name}` narrowed: {reason}. A caller that parsed "
-                      f"the wider type may fail on the narrower one.",
-                      f"{where}::{name}", f"Keep the wider type, or version the response.",
-                      reason, changelog=f"response field `{name}` narrowed ({reason}) on `{where}`")
+        for reason in _widenings(bf.type, bf.enum, bf.nullable, cf.type, cf.enum, cf.nullable):
+            diff.emit("AC005", Severity.HIGH, "A response field changed in a caller-breaking way",
+                      f"On `{where}`, response field `{name}` widened: {reason}. A caller written "
+                      f"against the narrower response does not handle the new one.",
+                      f"{where}::{name}", f"Keep the narrower guarantee, or version the response.",
+                      reason, changelog=f"response field `{name}` widened ({reason}) on `{where}`")
         _compare_enums(diff, where, f"response field `{name}`", f"{where}::{name}",
                        bf.enum, cf.enum, sends=False)
 
