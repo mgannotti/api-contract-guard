@@ -1,0 +1,28 @@
+slug: api-contract-guard
+title: API Contract Guard
+summary: Diff two API surfaces, report what breaks for callers, and draft the changelog.
+version: 1.0.0
+public_safe: true
+type: skill
+category: agent-operations
+preview: screenshots/preview.png
+
+author:
+  alias: mgann
+  name: Michael Gannotti
+  role: SE
+  discipline: Principal Solution Engineer
+  segment: Any
+  ou: Scout CodeOps
+
+roles: [Any]
+purpose: [reports, customer-facing]
+personas: [technical]
+outputs: [markdown, html-dashboard, json]
+requires: [python]
+setup: setup.md
+tags: [api, breaking-changes, semver, changelog]
+capabilities: [reads-files, writes-files, shell]
+network_required: false
+cloud_writes: false
+source_pack: scout-codeops-kit

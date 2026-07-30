@@ -1,0 +1,7 @@
+# API Contract Guard — runtime dependencies
+#
+# There are none. The engine uses only the Python standard library, which is what
+# makes this installable on a clean machine and auditable by reading.
+#
+# Development only:
+pytest>=8.0 ; extra == "dev"

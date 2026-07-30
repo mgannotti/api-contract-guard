@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.invalid/scout-meetingops-kit/report-schema.json",
+  "title": "Scout Meeting Ops Kit report",
+  "description": "Canonical result object emitted by every skill in this pack.",
+  "type": "object",
+  "required": ["schema_version", "skill", "verdict", "generated_at", "counts", "findings", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "skill": { "type": "string", "minLength": 1 },
+    "subject": { "type": "string" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "verdict": { "type": "string", "enum": ["pass", "review", "block"] },
+    "highest_severity": {
+      "type": ["string", "null"],
+      "enum": ["critical", "high", "medium", "low", "info", null]
+    },
+    "counts": {
+      "type": "object",
+      "required": ["critical", "high", "medium", "low", "info"],
+      "additionalProperties": false,
+      "properties": {
+        "critical": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "title", "detail"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "info"] },
+          "title": { "type": "string", "minLength": 1 },
+          "detail": { "type": "string" },
+          "locator": { "type": "string" },
+          "evidence": { "type": "string" },
+          "recommendation": { "type": "string" },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+    "summary": { "type": "object" },
+    "sections": { "type": "object" },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

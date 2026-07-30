@@ -1,0 +1,33 @@
+{
+  "cloud_writes": false,
+  "description": "Diff two API surfaces, report what breaks for callers, and draft the changelog.",
+  "distribution": "standalone",
+  "engine": "scripts/api_contract_guard.py",
+  "entrypoint": "SKILL.md",
+  "exit_codes": {
+    "0": "pass",
+    "1": "review",
+    "2": "block",
+    "3": "evidence error"
+  },
+  "input": "Two API surface descriptions (OpenAPI or a symbol export) to compare.",
+  "name": "api-contract-guard",
+  "network_required": false,
+  "outputs": [
+    "api-contract-guard.json",
+    "api-contract-guard.md",
+    "api-contract-guard.html"
+  ],
+  "runtime": {
+    "python": ">=3.10",
+    "third_party_packages": []
+  },
+  "schemas": {
+    "output": "references/report-schema.json"
+  },
+  "sends_messages": false,
+  "source_pack": "scout-codeops-kit",
+  "template": "templates/surface.example.json",
+  "tests": "tests/test_api_contract_guard.py",
+  "version": "1.0.0"
+}
